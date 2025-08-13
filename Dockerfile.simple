@@ -3,12 +3,23 @@ FROM node:18-alpine as frontend-builder
 
 WORKDIR /app
 
-# Copy package files - correct path
-COPY photo-processing-server/web/frontend/package*.json ./
-RUN npm ci --only=production
+# Ensure dev dependencies are installed even if environment defaults to production
+ENV NODE_ENV=development
+ENV NPM_CONFIG_PRODUCTION=false
 
-# Copy frontend source and build
-COPY photo-processing-server/web/frontend/ .
+# Copy package files first and install dependencies
+COPY photo-processing-server/web/frontend/package*.json ./
+RUN npm ci --include=dev
+
+# Copy frontend source files (avoiding node_modules overwrite)
+COPY photo-processing-server/web/frontend/src ./src
+COPY photo-processing-server/web/frontend/index.html ./
+COPY photo-processing-server/web/frontend/vite.config.ts ./
+COPY photo-processing-server/web/frontend/tsconfig.json ./
+COPY photo-processing-server/web/frontend/tailwind.config.js ./
+COPY photo-processing-server/web/frontend/postcss.config.js ./
+
+# Build the frontend
 RUN npm run build
 
 # Backend stage - use pre-built OpenCV image  
@@ -22,6 +33,9 @@ RUN go mod download
 
 # Copy backend source
 COPY photo-processing-server/ .
+
+# Ensure go.sum is up to date with all imports
+RUN go mod tidy
 
 # Build backend with correct main.go path
 RUN CGO_ENABLED=1 go build -o photo-processor-web ./cmd/web-server

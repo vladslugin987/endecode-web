@@ -8,9 +8,9 @@
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go build program.
-photo-processor-web
-photo-processing-server
+# Output of the go build program - specific binary executables
+/photo-processor-web
+/endecode-server
 
 # Go workspace file
 go.work
