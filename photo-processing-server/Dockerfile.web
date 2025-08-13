@@ -1,0 +1,72 @@
+# Multi-stage build for Photo Processing Web Server
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app/web/frontend
+
+# Copy only package manifest first for better caching
+COPY web/frontend/package.json ./
+
+# Install all dependencies (needed to run build with Vite)
+RUN npm install
+
+# Copy frontend source
+COPY web/frontend/ .
+
+# Build frontend
+RUN npm run build
+
+# Go backend builder stage
+FROM gocv/opencv:4.8.0 AS backend-builder
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the web server application (OpenCV and pkg-config preinstalled in base image)
+RUN go mod tidy
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o photo-processor-web ./cmd/web-server
+
+# Final stage - runtime image
+FROM gocv/opencv:4.8.0
+
+# Runtime already contains OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata adduser && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create app user
+# Create app user/group in Debian-based image
+RUN groupadd --gid 1001 appuser && \
+    useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash appuser
+
+WORKDIR /app
+
+# Copy binary from backend builder
+COPY --from=backend-builder /app/photo-processor-web .
+
+# Copy built frontend from frontend builder (keep same path used by Go server)
+COPY --from=frontend-builder /app/web/frontend/dist ./web/frontend/dist
+
+# Create data directories
+RUN mkdir -p /app/data/{photos,processed,temp} && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+# Default command
+CMD ["./photo-processor-web"]

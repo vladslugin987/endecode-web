@@ -1,0 +1,149 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles matching Kotlin theme */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  code {
+    font-family: Monaco, Menlo, 'Ubuntu Mono', monospace;
+  }
+
+  /* Dark mode defaults */
+  :root.dark body {
+    @apply bg-gray-900 text-gray-100;
+  }
+}
+
+/* Component styles matching Material 3 design */
+@layer components {
+  /* Elevated Card (matches Kotlin ElevatedCard) */
+  .elevated-card {
+    @apply bg-surface rounded-lg shadow-sm border border-gray-200;
+  }
+  
+  /* Button styles matching Kotlin Material 3 buttons */
+  .btn-primary {
+    @apply bg-primary text-on-primary rounded-md h-button px-4 
+           font-medium text-body-large transition-colors
+           hover:bg-primary-600 active:bg-primary-700
+           disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply bg-secondary text-on-secondary rounded-md h-button px-4
+           font-medium text-body-large transition-colors
+           hover:bg-secondary-600 active:bg-primary-700
+           disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed;
+  }
+  
+  .btn-tonal {
+    @apply bg-primary-50 text-primary rounded-md h-button px-4
+           font-medium text-body-large transition-colors
+           hover:bg-primary-100 active:bg-primary-200
+           disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed;
+  }
+  
+  .btn-text {
+    @apply bg-transparent text-primary rounded-md h-button px-4
+           font-medium text-body-large transition-colors
+           hover:bg-primary-50 active:bg-primary-100
+           disabled:text-gray-400 disabled:cursor-not-allowed;
+  }
+  
+  /* Input styles matching Kotlin OutlinedTextField */
+  .input-outlined {
+    @apply border border-gray-300 rounded-md px-3 py-2 text-body-large
+           bg-surface text-on-surface placeholder-gray-500
+           focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary
+           disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed;
+  }
+  
+  .input-error {
+    @apply border-red-500 focus:ring-red-500 focus:border-red-500;
+  }
+  
+  /* Console styles (matches Kotlin LazyColumn with monospace) */
+  .console-log {
+    @apply font-mono text-body-medium text-on-surface-variant py-1;
+  }
+  
+  /* Progress indicator (matches Kotlin LinearProgressIndicator) */
+  .progress-bar {
+    @apply w-full h-1 bg-primary-100 rounded-full overflow-hidden;
+  }
+  
+  .progress-fill {
+    @apply h-full bg-primary transition-all duration-300 ease-out;
+  }
+  
+  /* Drop zone styles (matches Kotlin drag & drop feedback) */
+  .drop-zone {
+    @apply border-2 border-dashed rounded-md h-drop-zone
+           flex items-center justify-center cursor-pointer
+           transition-all duration-200 ease-in-out;
+  }
+  
+  .drop-zone-idle {
+    @apply border-gray-300 bg-surface-variant text-on-surface-variant;
+  }
+  
+  .drop-zone-active {
+    @apply border-primary bg-primary-50 text-primary animate-pulse-border;
+  }
+  
+  /* Checkbox styles (matches Kotlin Material 3 Checkbox) */
+  .checkbox {
+    @apply w-4 h-4 text-primary bg-surface border-2 border-gray-300 rounded
+           focus:ring-primary focus:ring-2
+           checked:bg-primary checked:border-primary;
+  }
+  
+  /* Dialog styles (matches Kotlin AlertDialog) */
+  .dialog-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50;
+  }
+  
+  .dialog-content {
+    @apply bg-surface rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-screen overflow-y-auto;
+  }
+}
+
+/* Utilities for exact spacing matches */
+@layer utilities {
+  .gap-spacing-small { @apply gap-1; }
+  .gap-spacing-medium { @apply gap-2; }  
+  .gap-spacing-large { @apply gap-4; }
+  
+  .p-spacing-small { @apply p-1; }
+  .p-spacing-medium { @apply p-2; }
+  .p-spacing-large { @apply p-4; }
+  
+  .m-spacing-small { @apply m-1; }
+  .m-spacing-medium { @apply m-2; }
+  .m-spacing-large { @apply m-4; }
+}
+
+/* Animation for processing states */
+@keyframes loading-dots {
+  0%, 20% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.loading-dots span:nth-child(1) { animation: loading-dots 1.4s ease-in-out infinite; }
+.loading-dots span:nth-child(2) { animation: loading-dots 1.4s ease-in-out 0.2s infinite; }
+.loading-dots span:nth-child(3) { animation: loading-dots 1.4s ease-in-out 0.4s infinite; }
