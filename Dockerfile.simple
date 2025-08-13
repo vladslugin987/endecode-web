@@ -3,30 +3,30 @@ FROM node:18-alpine as frontend-builder
 
 WORKDIR /app
 
-# Copy package files
-COPY photo-processing-server/web/frontend/package.json photo-processing-server/web/frontend/package-lock.json ./
+# Copy package files - correct path
+COPY photo-processing-server/web/frontend/package*.json ./
 RUN npm ci --only=production
 
 # Copy frontend source and build
 COPY photo-processing-server/web/frontend/ .
 RUN npm run build
 
-# Backend stage - use pre-built OpenCV image
+# Backend stage - use pre-built OpenCV image  
 FROM gocv/opencv:4.8.0
 
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files - correct path
 COPY photo-processing-server/go.mod photo-processing-server/go.sum ./
 RUN go mod download
 
 # Copy backend source
 COPY photo-processing-server/ .
 
-# Build backend
-RUN CGO_ENABLED=1 go build -o photo-processor-web ./cmd/web
+# Build backend with correct main.go path
+RUN CGO_ENABLED=1 go build -o photo-processor-web ./cmd/web-server
 
-# Copy built frontend
+# Copy built frontend to correct location
 COPY --from=frontend-builder /app/dist ./web/frontend/dist
 
 # Create required directories
