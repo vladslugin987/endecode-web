@@ -1,37 +1,43 @@
-# Production Dockerfile for Railway/Cloud deployment
+# Production Dockerfile for Railway/Cloud deployment - Optimized
 FROM gocv/opencv:4.8.0 as backend-builder
 
 WORKDIR /app
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy go mod files and download dependencies first (better caching)
+COPY photo-processing-server/go.mod photo-processing-server/go.sum ./
 RUN go mod download
 
-# Copy source code
-COPY . .
+# Copy only backend source code
+COPY photo-processing-server/ .
 
-# Tidy and build
-RUN go mod tidy
+# Build the backend binary
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o photo-processor-web ./cmd/web
 
 # Frontend builder stage
 FROM node:18-alpine as frontend-builder
 
-WORKDIR /app/web/frontend
+WORKDIR /app
 
 # Copy package files
-COPY web/frontend/package.json ./
-RUN npm install
+COPY photo-processing-server/web/frontend/package.json photo-processing-server/web/frontend/package-lock.json ./
+RUN npm ci --only=production
 
 # Copy frontend source and build
-COPY web/frontend/ .
+COPY photo-processing-server/web/frontend/ .
 RUN npm run build
 
-# Final production stage
-FROM gocv/opencv:4.8.0
+# Final production stage - Use Ubuntu instead of full OpenCV image
+FROM ubuntu:22.04
 
-# Install ca-certificates for HTTPS requests
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies in a single layer
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libopencv-dev \
+        libgocv-dev \
+        curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
 # Create app user
 RUN groupadd --gid 1001 appuser && \
@@ -43,7 +49,7 @@ WORKDIR /app
 COPY --from=backend-builder /app/photo-processor-web .
 
 # Copy built frontend
-COPY --from=frontend-builder /app/web/frontend/dist ./web/frontend/dist
+COPY --from=frontend-builder /app/dist ./web/frontend/dist
 
 # Create required directories
 RUN mkdir -p /app/data/{photos,processed,temp,uploads} && \
