@@ -1,98 +1,46 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Ignore uploads directory (contains user data)
+uploads/
+data/
 
-# Test binary, built with `go test -c`
-*.test
+# Ignore environment files with sensitive data
+.env
 
-# Output of the go build program - specific binary executables
-/photo-processor-web
-/endecode-server
+# Gradle
+.gradle/
+build/
+gradle-app.setting
+!gradle-wrapper.jar
+.gradletasknamecache
 
-# Go workspace file
-go.work
-
-# Dependency directories (remove the comment below to include it)
-vendor/
-
-# Go module cache
-go/
+# Kotlin Multiplatform
+*.kotlin_module
 
 # IDE
+.fleet/
 .idea/
-.vscode/
 *.swp
 *.swo
+*~
 
-# OS
+# macOS
 .DS_Store
+
+# Windows
 Thumbs.db
+ehthumbs.db
 
-# Logs
-*.log
-
-# Runtime data
-data/
-uploads/
-*.zip
-
-# Environment variables
-.env.local
-.env.production
-
-# Node.js
+# Node.js (for frontend)
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Frontend build artifacts
-web/frontend/dist/
-web/frontend/build/
+# WordPress
+wordpress-setup/uploads.ini
+wordpress-setup/data/
 
-# Gradle (for Kotlin desktop version)
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-# IntelliJ IDEA
-.idea
-*.iws
-*.iml
-*.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-# Eclipse
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
-
-# NetBeans
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-# VS Code
-.vscode/
-
-# macOS
-.DS_Store
+# Docker volumes data
+*.log
 
 # Temporary files
 *.tmp

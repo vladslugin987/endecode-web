@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  wordpress-db:
+    image: mysql:8.0
+    container_name: endecode-wordpress-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+    volumes:
+      - wordpress_db:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  wordpress:
+    depends_on:
+      - wordpress-db
+    image: wordpress:6.7-php8.2-apache
+    container_name: endecode-wordpress
+    restart: unless-stopped
+    ports:
+      - "8082:80"
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DEBUG: 1
+    volumes:
+      - wordpress_data:/var/www/html
+      - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+    networks:
+      - default
+      - endecode-network
+
+  phpmyadmin:
+    depends_on:
+      - wordpress-db
+    image: phpmyadmin/phpmyadmin
+    container_name: endecode-phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: wordpress-db
+      MYSQL_ROOT_PASSWORD: rootpassword
+
+volumes:
+  wordpress_data:
+  wordpress_db:
+
+networks:
+  endecode-network:
+    external: true
+    name: endecode-compose-main_default

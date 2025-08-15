@@ -66,16 +66,17 @@ const FileSelector: React.FC = () => {
   }, [uploadAndSelect]);
 
   return (
-    <div className="space-y-1">
-      {/* Choose Folder Button */}
+    <div className="space-y-4">
+      {/* Primary Action Button */}
       <button
         disabled={isProcessing}
         onClick={() => document.getElementById('file-input')?.click()}
-        className="w-full h-8 px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400
-                 text-white rounded text-sm font-medium transition-colors
-                 disabled:cursor-not-allowed"
+        className="w-full flex items-center justify-center px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-xl font-medium transition-all duration-200 disabled:cursor-not-allowed shadow-sm"
       >
-        Choose folder with files
+        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+        </svg>
+        Choose Folder
       </button>
 
       {/* Hidden file input */}
@@ -96,32 +97,50 @@ const FileSelector: React.FC = () => {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`
-          w-full h-10 border-2 border-dashed rounded-lg flex items-center justify-center
-          transition-all duration-200 text-sm font-medium
+          relative w-full h-24 border-2 border-dashed rounded-xl flex flex-col items-center justify-center
+          transition-all duration-200 cursor-pointer
           ${isDragOver 
-            ? 'border-blue-500 bg-blue-50 text-blue-700' 
-            : 'border-gray-300 bg-gray-50 text-gray-500'
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/20' 
+            : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/10'
           }
-          ${isProcessing ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-blue-400 hover:bg-blue-25'}
+          ${isProcessing ? 'cursor-not-allowed opacity-50' : ''}
         `}
       >
-        {isDragOver ? 'Drop folder here' : 'Drag and drop folder here'}
+        <svg className={`w-6 h-6 mb-1 ${isDragOver ? 'text-blue-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+        <span className={`text-sm font-medium ${isDragOver ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'}`}>
+          {isDragOver ? 'Drop folder here' : 'Drag and drop folder here'}
+        </span>
       </div>
 
       {/* Selected Path Display */}
       {state.processing.selectedPath && (
-        <div className="p-2 bg-green-50 border border-green-200 rounded text-sm">
-          <div className="text-green-800 font-medium">Selected:</div>
-          <div className="text-green-700 text-xs break-all mt-1">
-            {state.processing.selectedPath}
+        <div className="p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-xl">
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 w-5 h-5 text-green-600 dark:text-green-400 mt-0.5">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-green-800 dark:text-green-200">
+                Folder Selected
+              </p>
+              <p className="text-sm text-green-700 dark:text-green-300 break-all mt-1">
+                {state.processing.selectedPath}
+              </p>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Help Text */}
-      <p className="text-xs text-gray-500">
-        Supported files: .jpg, .jpeg, .png, .mp4, .avi, .mov, .mkv, .txt
-      </p>
+      {/* Supported Files Info */}
+      <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+        <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+          <span className="font-medium">Supported formats:</span> JPEG, PNG, MP4, AVI, MOV, MKV, TXT
+        </p>
+      </div>
     </div>
   );
 };

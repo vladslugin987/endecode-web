@@ -35,6 +35,7 @@ export const useWebSocket = ({ onMessage, url = `${window.location.origin.replac
       return;
     }
     try {
+      // Cookie-based session will be sent automatically by browser
       const ws = new WebSocket(url);
       
       ws.onopen = () => {

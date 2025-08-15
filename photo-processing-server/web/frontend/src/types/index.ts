@@ -1,5 +1,22 @@
 // Types matching Kotlin models and HomeViewModel states
 
+// User and authentication types
+export interface User {
+  id: string;
+  email: string;
+  nickname: string;
+  role: 'user' | 'admin';
+  createdAt: string;
+  lastLogin?: string;
+}
+
+export interface UserStats {
+  totalUsers: number;
+  adminUsers: number;
+  activeUsers: number;
+  registeredToday: number;
+}
+
 // Processing state (matches HomeViewModel)
 export interface ProcessingState {
   selectedPath: string | null;
@@ -211,4 +228,69 @@ export interface FileTypeInfo {
 export interface ValidationResult {
   isValid: boolean;
   errors: string[];
+}
+
+// Subscription types
+export interface Subscription {
+  id: string;
+  user_id: string;
+  plan_type: string;
+  status: 'active' | 'expired' | 'cancelled' | 'pending';
+  start_date: string;
+  end_date: string;
+  created_at: string;
+  updated_at: string;
+  last_payment_id?: string;
+  last_payment_date?: string;
+  next_payment_date?: string;
+  auto_renewal: boolean;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  name: string;
+  description: string;
+  price_usd: number;
+  price_crypto?: string;
+  duration_days: number;
+  max_processing_jobs: number; // -1 for unlimited
+  max_file_size: number; // in bytes
+  features: string[];
+  active: boolean;
+}
+
+export interface Payment {
+  id: string;
+  user_id: string;
+  subscription_id: string;
+  amount: number;
+  currency: string;
+  payment_method: 'crypto' | 'card';
+  status: 'pending' | 'completed' | 'failed' | 'expired';
+  crypto_address?: string;
+  crypto_amount?: string;
+  transaction_hash?: string;
+  external_payment_id?: string;
+  created_at: string;
+  updated_at: string;
+  expires_at?: string;
+  paid_at?: string;
+}
+
+export interface UserUsage {
+  id: string;
+  user_id: string;
+  month: string;
+  processing_jobs: number;
+  files_processed: number;
+  storage_used_bytes: number;
+  last_reset_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CryptoCurrency {
+  code: string;
+  name: string;
+  symbol: string;
 }

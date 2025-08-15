@@ -11,14 +11,16 @@ import (
 // BatchSettings maps 1:1 to the frontend BatchCopySettings
 // and to the Kotlin dialog parameters.
 type BatchSettings struct {
-    NumberOfCopies               int    `json:"numberOfCopies"`
-    BaseText                     string `json:"baseText"`
-    AddSwapEncoding              bool   `json:"addSwapEncoding"`
-    AddVisibleWatermark          bool   `json:"addVisibleWatermark"`
-    CreateZip                    bool   `json:"createZip"`
-    WatermarkText                string `json:"watermarkText,omitempty"`
-    PhotoNumber                  *int   `json:"photoNumber,omitempty"`
-    UseOrderNumberAsPhotoNumber  bool   `json:"useOrderNumberAsPhotoNumber,omitempty"`
+    NumberOfCopies               int                    `json:"numberOfCopies"`
+    BaseText                     string                 `json:"baseText"`
+    AddSwapEncoding              bool                   `json:"addSwapEncoding"`
+    SwapPairs                    []map[string]string    `json:"swapPairs,omitempty"`
+    AddVisibleWatermark          bool                   `json:"addVisibleWatermark"`
+    WatermarkPositions           []int                  `json:"watermarkPositions,omitempty"`
+    CreateZip                    bool                   `json:"createZip"`
+    WatermarkText                string                 `json:"watermarkText,omitempty"`
+    PhotoNumber                  *int                   `json:"photoNumber,omitempty"`
+    UseOrderNumberAsPhotoNumber  bool                   `json:"useOrderNumberAsPhotoNumber,omitempty"`
 }
 
 // Processor provides high-level operations used by HTTP handlers.

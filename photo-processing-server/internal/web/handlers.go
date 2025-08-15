@@ -56,6 +56,7 @@ type ProcessingJob struct {
 	Error    string
 	Result   interface{}
 	StartTime time.Time
+	UserID   string
 }
 
 // In-memory job store (in production, use Redis or database)
@@ -71,18 +72,34 @@ func opKey(op, path string) string {
     return op + "|" + path
 }
 
+func generateUUID() string { return uuid.New().String() }
+
 // WebHandler contains all web-related handlers
 type WebHandler struct {
-	processor *services.Processor
-	logger    *services.Logger
+	processor           *services.Processor
+	logger              *services.Logger
+	subsService         *services.SubscriptionService
+	notificationService *services.NotificationService
 }
 
 // NewWebHandler creates a new web handler
-func NewWebHandler(processor *services.Processor, logger *services.Logger) *WebHandler {
+func NewWebHandler(processor *services.Processor, logger *services.Logger, subsService *services.SubscriptionService, notificationService *services.NotificationService) *WebHandler {
 	return &WebHandler{
-		processor: processor,
-		logger:    logger,
+		processor:           processor,
+		logger:              logger,
+		subsService:         subsService,
+		notificationService: notificationService,
 	}
+}
+
+// getCurrentUserID extracts userId placed by auth middleware (if any)
+func getCurrentUserID(c *gin.Context) string {
+    if v, exists := c.Get("userId"); exists {
+        if s, ok := v.(string); ok {
+            return s
+        }
+    }
+    return ""
 }
 
 // SetupRoutes configures all web routes
@@ -148,7 +165,7 @@ func (h *WebHandler) SetupRoutes(router *gin.Engine) {
 }
 
 // Helper function to create and start a processing job, passing jobID into operation
-func (h *WebHandler) startJob(operation func(jobID string) error) string {
+func (h *WebHandler) startJob(userID string, operation func(jobID string) error) string {
     jobID := uuid.New().String()
 
     job := &ProcessingJob{
@@ -156,6 +173,7 @@ func (h *WebHandler) startJob(operation func(jobID string) error) string {
         Status:    "processing",
         Progress:  0.0,
         StartTime: time.Now(),
+        UserID:    userID,
     }
 
     SaveJob(job)
@@ -194,6 +212,12 @@ func (h *WebHandler) handleEncrypt(c *gin.Context) {
             return
         }
     }
+    // require logged-in user
+    userID := getCurrentUserID(c)
+    if userID == "" {
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+        return
+    }
     var req ProcessingRequest
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(http.StatusBadRequest, ApiResponse{
@@ -214,12 +238,25 @@ func (h *WebHandler) handleEncrypt(c *gin.Context) {
     activeOps[key] = "pending"
     activeMutex.Unlock()
 
+    // Check subscription limits
+    if h.subsService != nil {
+        allowed, message, err := h.subsService.CheckSubscriptionLimits(userID, "processing_job")
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, ApiResponse{Success: false, Error: "Failed to check subscription limits"})
+            return
+        }
+        if !allowed {
+            c.JSON(http.StatusForbidden, ApiResponse{Success: false, Error: message})
+            return
+        }
+    }
+
     // Log only once when we actually start
     h.logger.Log("=== Starting Encryption Process ===")
     h.logger.Log(fmt.Sprintf("Selected Path: %s", req.SelectedPath))
     h.logger.Log(fmt.Sprintf("Name to Inject: %s", req.NameToInject))
 
-    jobID := h.startJob(func(id string) error {
+    jobID := h.startJob(userID, func(id string) error {
         activeMutex.Lock()
         activeOps[key] = id
         activeMutex.Unlock()
@@ -229,6 +266,11 @@ func (h *WebHandler) handleEncrypt(c *gin.Context) {
         })
         if err != nil {
             h.logger.Error(fmt.Sprintf("Encrypt error: %v", err))
+        } else {
+            // Increment usage counter on success
+            if h.subsService != nil {
+                h.subsService.IncrementUsage(userID, "processing_jobs", 1)
+            }
         }
         activeMutex.Lock()
         delete(activeOps, key)
@@ -256,6 +298,11 @@ func (h *WebHandler) handleDecrypt(c *gin.Context) {
             return
         }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" {
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+        return
+    }
     var req ProcessingRequest
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(http.StatusBadRequest, ApiResponse{
@@ -279,7 +326,7 @@ func (h *WebHandler) handleDecrypt(c *gin.Context) {
     h.logger.Log("=== Starting Decryption Process ===")
     h.logger.Log(fmt.Sprintf("Selected Path: %s", req.SelectedPath))
 
-    jobID := h.startJob(func(id string) error {
+    jobID := h.startJob(userID, func(id string) error {
         activeMutex.Lock()
         activeOps[key] = id
         activeMutex.Unlock()
@@ -315,6 +362,11 @@ func (h *WebHandler) handleBatchCopy(c *gin.Context) {
             return
         }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" {
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+        return
+    }
     var req BatchCopyRequest
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(http.StatusBadRequest, ApiResponse{
@@ -340,7 +392,7 @@ func (h *WebHandler) handleBatchCopy(c *gin.Context) {
     h.logger.Log(fmt.Sprintf("Number of copies: %d", req.Settings.NumberOfCopies))
     h.logger.Log(fmt.Sprintf("Base text: %s", req.Settings.BaseText))
 
-    jobID := h.startJob(func(id string) error {
+    jobID := h.startJob(userID, func(id string) error {
         activeMutex.Lock()
         activeOps[key] = id
         activeMutex.Unlock()
@@ -424,10 +476,7 @@ func (h *WebHandler) handleBatchCopy(c *gin.Context) {
                     if len(sample) > 0 { break }
                 }
             }
-            resultObj := map[string]interface{}{"downloadToken": dlToken, "path": resultPath}
-            if len(sample) > 0 { resultObj["watermarkSample"] = sample }
-            SetJobResult(id, resultObj)
-            BroadcastLog(fmt.Sprintf("Result available. Token: %s", dlToken))
+            SetJobResult(id, map[string]interface{}{"path": resultPath, "watermarkSample": sample})
         }
         activeMutex.Lock()
         delete(activeOps, key)
@@ -454,6 +503,11 @@ func (h *WebHandler) handleAddText(c *gin.Context) {
             return
         }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" {
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+        return
+    }
     var req AddTextRequest
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(http.StatusBadRequest, ApiResponse{
@@ -479,11 +533,17 @@ func (h *WebHandler) handleAddText(c *gin.Context) {
     h.logger.Log(fmt.Sprintf("Text: %s", req.Settings.Text))
     h.logger.Log(fmt.Sprintf("Photo Number: %d", req.Settings.PhotoNumber))
 
-    jobID := h.startJob(func(id string) error {
+    jobID := h.startJob(userID, func(id string) error {
         activeMutex.Lock()
         activeOps[key] = id
         activeMutex.Unlock()
         err := h.processor.AddTextToPhoto(req.SelectedPath, req.Settings.Text, req.Settings.PhotoNumber)
+        if err != nil {
+            h.logger.Error(fmt.Sprintf("Add text error: %v", err))
+            BroadcastError(id, err.Error())
+        } else {
+            BroadcastComplete(id, nil)
+        }
         activeMutex.Lock()
         delete(activeOps, key)
         activeMutex.Unlock()
@@ -493,7 +553,7 @@ func (h *WebHandler) handleAddText(c *gin.Context) {
     c.JSON(http.StatusOK, ApiResponse{
         Success: true,
         JobID:   jobID,
-        Message: "Adding text to photo",
+        Message: "Add text started",
     })
 
     h.logger.Processing(fmt.Sprintf("JOB %s: Add text started for %s", jobID, req.SelectedPath))
@@ -509,12 +569,14 @@ func (h *WebHandler) handleRemoveWatermarks(c *gin.Context) {
             return
         }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" {
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+        return
+    }
     var req ProcessingRequest
     if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusBadRequest, ApiResponse{
-            Success: false,
-            Error:   fmt.Sprintf("Invalid request: %v", err),
-        })
+        c.JSON(http.StatusBadRequest, ApiResponse{ Success: false, Error: fmt.Sprintf("Invalid request: %v", err) })
         return
     }
 
@@ -528,17 +590,16 @@ func (h *WebHandler) handleRemoveWatermarks(c *gin.Context) {
     activeOps[key] = "pending"
     activeMutex.Unlock()
 
-    // Log only once when we actually start
-    h.logger.Log("=== Removing Watermarks ===")
+    h.logger.Log("=== Removing Invisible Watermarks ===")
     h.logger.Log(fmt.Sprintf("Selected Path: %s", req.SelectedPath))
 
-    jobID := h.startJob(func(id string) error {
+    jobID := h.startJob(userID, func(id string) error {
         activeMutex.Lock()
         activeOps[key] = id
         activeMutex.Unlock()
-        err := h.processor.RemoveWatermarks(req.SelectedPath, func(progress float64) {
-            UpdateJobProgress(id, progress)
-            BroadcastProgress(id, progress)
+        err := h.processor.RemoveWatermarks(req.SelectedPath, func(p float64) {
+            UpdateJobProgress(id, p)
+            BroadcastProgress(id, p)
         })
         if err != nil {
             h.logger.Error(fmt.Sprintf("Remove watermarks error: %v", err))
@@ -549,12 +610,7 @@ func (h *WebHandler) handleRemoveWatermarks(c *gin.Context) {
         return err
     })
 
-    c.JSON(http.StatusOK, ApiResponse{
-        Success: true,
-        JobID:   jobID,
-        Message: "Removing watermarks",
-    })
-
+    c.JSON(http.StatusOK, ApiResponse{ Success: true, JobID: jobID, Message: "Removal started" })
     h.logger.Processing(fmt.Sprintf("JOB %s: Remove watermarks started for %s", jobID, req.SelectedPath))
 }
 
@@ -707,13 +763,19 @@ func (h *WebHandler) handleUpload(c *gin.Context) {
 
 // Processing status handler
 func (h *WebHandler) handleProcessingStatus(c *gin.Context) {
+	userID := getCurrentUserID(c)
+	if userID == "" {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+		return
+	}
 	jobID := c.Param("id")
-	
 	job, exists := GetJob(jobID)
 	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error": "Job not found",
-		})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+		return
+	}
+	if job.UserID != userID {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
 		return
 	}
 
@@ -771,35 +833,33 @@ func (h *WebHandler) handleDownload(c *gin.Context) {
     DeleteDownloadToken(token)
 }
 
-// Admin: list jobs
+// Admin: list jobs (filtered by current user)
 func (h *WebHandler) handleListJobs(c *gin.Context) {
-    cfg := config.Load()
-    if cfg.APIToken != "" {
-        auth := c.GetHeader("Authorization")
-        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken {
-            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-            return
-        }
-    }
-    c.JSON(http.StatusOK, gin.H{"jobs": ListJobs()})
-}
-
-// Admin: job details
-func (h *WebHandler) handleJobDetails(c *gin.Context) {
-    cfg := config.Load()
-    if cfg.APIToken != "" {
-        auth := c.GetHeader("Authorization")
-        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken {
-            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-            return
-        }
-    }
-    id := c.Param("id")
-    if job, ok := GetJob(id); ok {
-        c.JSON(http.StatusOK, job)
+    userID := getCurrentUserID(c)
+    if userID == "" {
+        c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
         return
     }
-    c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
+    all := ListJobs()
+    // Filter summaries by user
+    filtered := make([]JobSummary, 0, len(all))
+    for _, s := range all {
+        if j, ok := GetJob(s.ID); ok && j.UserID == userID {
+            filtered = append(filtered, s)
+        }
+    }
+    c.JSON(http.StatusOK, gin.H{"jobs": filtered})
+}
+
+// Admin: job details (only owner)
+func (h *WebHandler) handleJobDetails(c *gin.Context) {
+    userID := getCurrentUserID(c)
+    if userID == "" { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"}); return }
+    id := c.Param("id")
+    job, ok := GetJob(id)
+    if !ok { c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Job not found"}); return }
+    if job.UserID != userID { c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden"}); return }
+    c.JSON(http.StatusOK, gin.H{"id": job.ID, "status": job.Status, "progress": job.Progress, "result": job.Result, "startTime": job.StartTime})
 }
 
 // Admin: approve job and issue download token
@@ -812,12 +872,21 @@ func (h *WebHandler) handleApproveJob(c *gin.Context) {
             return
         }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"}); return }
     id := c.Param("id")
-    job, ok := GetJob(id)
-    if !ok {
-        c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-        return
+    
+    // Parse request body for additional data
+    var approveReq struct {
+        OrderID     string `json:"order_id"`
+        ExpiryDays  int    `json:"expiry_days"`
     }
+    c.ShouldBindJSON(&approveReq)
+    
+    job, ok := GetJob(id)
+    if !ok { c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"}); return }
+    if job.UserID != userID { c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden"}); return }
+    
     // Expect result to contain path
     var path string
     if m, ok := job.Result.(map[string]interface{}); ok {
@@ -829,16 +898,35 @@ func (h *WebHandler) handleApproveJob(c *gin.Context) {
         c.JSON(http.StatusBadRequest, gin.H{"error": "Job has no result path to approve"})
         return
     }
+    
     token := uuid.New().String()
     SaveDownloadToken(token, path)
-    // update job result with approved token
+    
+    // Create full download URL
+    downloadURL := fmt.Sprintf("http://localhost:8090/api/download/%s", token)
+    
+    // Update job result with approved token
     if m, ok := job.Result.(map[string]interface{}); ok {
         m["approvedToken"] = token
+        m["downloadURL"] = downloadURL
         SetJobResult(id, m)
     }
-    c.JSON(http.StatusOK, gin.H{
-        "success": true,
+    
+    // If this is a WooCommerce order, send notifications
+    if approveReq.OrderID != "" {
+        // Send customer download link notification
+        h.notificationService.SendCustomerDownloadLink(approveReq.OrderID, "", downloadURL, approveReq.ExpiryDays)
+        
+        // Send status update to WordPress
+        h.notificationService.SendOrderStatusWebhook(approveReq.OrderID, "approved", downloadURL)
+        
+        h.logger.Log(fmt.Sprintf("Approved WooCommerce order %s, job %s, download: %s", approveReq.OrderID, id, downloadURL))
+    }
+    
+    c.JSON(http.StatusOK, gin.H{ 
+        "success": true, 
         "token": token,
+        "download_link": downloadURL,
     })
 }
 
@@ -858,17 +946,14 @@ func (h *WebHandler) handleJobImages(c *gin.Context) {
     cfg := config.Load()
     if cfg.APIToken != "" {
         auth := c.GetHeader("Authorization")
-        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken {
-            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-            return
-        }
+        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"}); return }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"}); return }
     id := c.Param("id")
     job, ok := GetJob(id)
-    if !ok {
-        c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-        return
-    }
+    if !ok { c.JSON(http.StatusNotFound, gin.H{"error": "Job not found"}); return }
+    if job.UserID != userID { c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden"}); return }
     var basePath string
     if m, ok := job.Result.(map[string]interface{}); ok {
         if p, ok := m["path"].(string); ok {
@@ -974,17 +1059,14 @@ func (h *WebHandler) handleJobPreview(c *gin.Context) {
     cfg := config.Load()
     if cfg.APIToken != "" {
         auth := c.GetHeader("Authorization")
-        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken {
-            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-            return
-        }
+        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"}); return }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"}); return }
     id := c.Param("id")
     job, ok := GetJob(id)
-    if !ok {
-        c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Job not found"})
-        return
-    }
+    if !ok { c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Job not found"}); return }
+    if job.UserID != userID { c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden"}); return }
     var basePath string
     if m, ok := job.Result.(map[string]interface{}); ok {
         if p, ok := m["path"].(string); ok {
@@ -1032,14 +1114,14 @@ func (h *WebHandler) handleJobStats(c *gin.Context) {
     cfg := config.Load()
     if cfg.APIToken != "" {
         auth := c.GetHeader("Authorization")
-        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken {
-            c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-            return
-        }
+        if len(auth) < 8 || auth[:7] != "Bearer " || auth[7:] != cfg.APIToken { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"}); return }
     }
+    userID := getCurrentUserID(c)
+    if userID == "" { c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required"}); return }
     id := c.Param("id")
     job, ok := GetJob(id)
     if !ok { c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Job not found"}); return }
+    if job.UserID != userID { c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Forbidden"}); return }
     var basePath string
     if m, ok := job.Result.(map[string]interface{}); ok {
         if p, ok := m["path"].(string); ok { basePath = p }

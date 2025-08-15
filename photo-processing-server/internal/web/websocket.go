@@ -27,6 +27,7 @@ type WSConnection struct {
 	conn         *websocket.Conn
 	send         chan WSMessage
 	subscribedTo string // Job ID this connection is subscribed to
+	userID       string // owner of the connection, may be empty if not logged in
 }
 
 // WebSocket hub manages all connections
@@ -64,7 +65,8 @@ func InitializeWebSocket(logger *services.Logger) {
 	
 	// Hook into logger to broadcast logs
 	logger.SetWebSocketBroadcaster(func(message string) {
-		BroadcastLog(message)
+		// Do not broadcast raw logs globally; send only to clients subscribed to a job
+		// Generic system logs without job context are ignored to prevent cross-user leak
 	})
 }
 
@@ -90,11 +92,15 @@ func (h *WSHub) run() {
 		case message := <-h.broadcast:
 			h.mutex.RLock()
 			for conn := range h.connections {
-				select {
-				case conn.send <- message:
-				default:
-					delete(h.connections, conn)
-					close(conn.send)
+				// Only deliver messages with jobId to matching subscribers
+				jobId, _ := message.Data["jobId"].(string)
+				if jobId != "" && conn.subscribedTo == jobId {
+					select {
+					case conn.send <- message:
+					default:
+						delete(h.connections, conn)
+						close(conn.send)
+					}
 				}
 			}
 			h.mutex.RUnlock()
@@ -112,6 +118,13 @@ func HandleWebSocket(c *gin.Context) {
             return
         }
     }
+    // Allow connect even without session (subscribe will enforce ownership)
+    var uid string
+    if cookie, err := c.Cookie("session_token"); err == nil {
+        if u, ok := getUserIDBySession(cookie); ok {
+            uid = u
+        }
+    }
     conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
     if err != nil {
         log.Printf("WebSocket upgrade error: %v", err)
@@ -121,6 +134,7 @@ func HandleWebSocket(c *gin.Context) {
     wsConn := &WSConnection{
         conn: conn,
         send: make(chan WSMessage, 256),
+        userID: uid,
     }
 
     hub.register <- wsConn
@@ -150,22 +164,21 @@ func (c *WSConnection) readPump() {
 		// Handle client messages
 		switch msg.Type {
 		case "subscribe":
-			// Throttle duplicate subscribe logs within 2s for same job
-			if c.subscribedTo != msg.JobID {
-				c.subscribedTo = msg.JobID
-				log.Printf("Client subscribed to job: %s", msg.JobID)
-			} else {
-				// avoid log spam on rapid resubscribe
-			}
-			// Immediately send current job snapshot to avoid race conditions
+			// Validate ownership of the job
 			if job, ok := GetJob(msg.JobID); ok {
-				// Send progress/status or completion/error snapshot
-				if job.Status == "completed" {
-					c.send <- WSMessage{Type: "complete", Data: map[string]interface{}{"jobId": job.ID}}
-				} else if job.Status == "error" {
-					c.send <- WSMessage{Type: "error", Data: map[string]interface{}{"jobId": job.ID, "error": job.Error}}
-				} else {
-					c.send <- WSMessage{Type: "progress", Data: map[string]interface{}{"jobId": job.ID, "progress": job.Progress}}
+				if c.userID != "" && job.UserID == c.userID {
+					if c.subscribedTo != msg.JobID {
+						c.subscribedTo = msg.JobID
+						log.Printf("Client subscribed to job: %s", msg.JobID)
+					}
+					// Immediately send current job snapshot
+					if job.Status == "completed" {
+						c.send <- WSMessage{Type: "complete", Data: map[string]interface{}{"jobId": job.ID}}
+					} else if job.Status == "error" {
+						c.send <- WSMessage{Type: "error", Data: map[string]interface{}{"jobId": job.ID, "error": job.Error}}
+					} else {
+						c.send <- WSMessage{Type: "progress", Data: map[string]interface{}{"jobId": job.ID, "progress": job.Progress}}
+					}
 				}
 			}
 		case "unsubscribe":
@@ -199,22 +212,7 @@ func BroadcastLog(message string) {
 	if hub == nil {
 		return
 	}
-	
-	msg := WSMessage{
-		Type: "log",
-		Data: map[string]interface{}{
-			"message": message,
-		},
-	}
-	
-	hub.mutex.RLock()
-	for conn := range hub.connections {
-		select {
-		case conn.send <- msg:
-		default:
-		}
-	}
-	hub.mutex.RUnlock()
+	// Log messages are not broadcasted globally to prevent leaking between users
 }
 
 // BroadcastProgress sends progress update to subscribed clients
@@ -222,7 +220,6 @@ func BroadcastProgress(jobID string, progress float64) {
 	if hub == nil {
 		return
 	}
-	
 	msg := WSMessage{
 		Type: "progress",
 		Data: map[string]interface{}{
@@ -230,8 +227,6 @@ func BroadcastProgress(jobID string, progress float64) {
 			"jobId":    jobID,
 		},
 	}
-	
-	// Send to clients subscribed to this job
 	hub.mutex.RLock()
 	for conn := range hub.connections {
 		if conn.subscribedTo == jobID {
@@ -250,7 +245,6 @@ func BroadcastComplete(jobID string, result interface{}) {
 	if hub == nil {
 		return
 	}
-	
 	msg := WSMessage{
 		Type: "complete",
 		Data: map[string]interface{}{
@@ -258,8 +252,6 @@ func BroadcastComplete(jobID string, result interface{}) {
 			"result": result,
 		},
 	}
-	
-	// Send to clients subscribed to this job
 	hub.mutex.RLock()
 	for conn := range hub.connections {
 		if conn.subscribedTo == jobID {
@@ -277,7 +269,6 @@ func BroadcastError(jobID string, errorMsg string) {
 	if hub == nil {
 		return
 	}
-	
 	msg := WSMessage{
 		Type: "error",
 		Data: map[string]interface{}{
@@ -285,8 +276,6 @@ func BroadcastError(jobID string, errorMsg string) {
 			"error": errorMsg,
 		},
 	}
-	
-	// Send to clients subscribed to this job
 	hub.mutex.RLock()
 	for conn := range hub.connections {
 		if conn.subscribedTo == jobID {

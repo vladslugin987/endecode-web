@@ -1,4 +1,17 @@
-import { BatchCopySettings, AddTextSettings } from '../types';
+import { 
+  EncryptRequest, 
+  DecryptRequest, 
+  BatchCopyRequest, 
+  AddTextRequest, 
+  RemoveWatermarksRequest, 
+  ProcessingJob,
+  User,
+  UserStats,
+  Subscription,
+  SubscriptionPlan,
+  Payment,
+  UserUsage
+} from '../types';
 
 const API_BASE = `${window.location.origin}/api`;
 
@@ -7,29 +20,6 @@ interface ApiResponse {
   message?: string;
   jobId?: string;
   error?: string;
-}
-
-interface EncryptRequest {
-  selectedPath: string;
-  nameToInject: string;
-}
-
-interface DecryptRequest {
-  selectedPath: string;
-}
-
-interface BatchCopyRequest {
-  selectedPath: string;
-  settings: BatchCopySettings;
-}
-
-interface AddTextRequest {
-  selectedPath: string;
-  settings: AddTextSettings;
-}
-
-interface RemoveWatermarksRequest {
-  selectedPath: string;
 }
 
 class ApiError extends Error {
@@ -47,6 +37,7 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
       headers,
+      credentials: 'include',
       ...options,
     });
 
@@ -134,7 +125,7 @@ export async function getProcessingStatus(jobId: string): Promise<{
 }
 
 export async function downloadResult(token: string): Promise<Blob> {
-  const response = await fetch(`${API_BASE}/download/${token}`);
+  const response = await fetch(`${API_BASE}/download/${token}`, { credentials: 'include' });
   if (!response.ok) {
     throw new ApiError(`Download failed: ${response.statusText}`, response.status);
   }
@@ -188,4 +179,102 @@ export async function adminStats(id: string): Promise<{ stats: { images: number;
 export interface AdminLog { message: string; timestamp: string; level: string }
 export async function adminLogs(id: string): Promise<{ logs: AdminLog[] }> {
   return fetchApi(`/admin/jobs/${id}/logs`);
+}
+
+// Auth API
+export async function register(email: string, password: string): Promise<{ id: string; email: string }> {
+  return fetchApi('/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) });
+}
+
+export async function login(email: string, password: string): Promise<{ id: string; email: string }> {
+  return fetchApi('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+}
+
+export async function logout(): Promise<{ success: boolean }> {
+  return fetchApi('/auth/logout', { method: 'POST' });
+}
+
+export async function me(): Promise<User | { error: string }> {
+  return fetchApi('/auth/me');
+}
+
+// Super Admin API
+export async function adminUsers(): Promise<{ users: User[] }> {
+  return fetchApi('/admin/users');
+}
+
+export async function adminUserStats(): Promise<UserStats> {
+  return fetchApi('/admin/users/stats');
+}
+
+// Subscription API
+export async function getMySubscription(): Promise<{ subscription: Subscription; plan: SubscriptionPlan }> {
+  return fetchApi('/subscription/my');
+}
+
+export async function getSubscriptionPlans(): Promise<{ 
+  plans: SubscriptionPlan[]; 
+  currencies: { code: string; name: string; symbol: string }[] 
+}> {
+  return fetchApi('/subscription/plans');
+}
+
+export async function getMyUsage(): Promise<{ 
+  usage: UserUsage; 
+  limits: { processing_jobs: number; max_file_size: number } 
+}> {
+  return fetchApi('/subscription/usage');
+}
+
+export async function createCryptoPayment(planType: string, currency: string): Promise<{
+  payment_id: string;
+  payment_url: string;
+  crypto_address: string;
+  crypto_amount: string;
+  currency: string;
+  expires_at: string;
+  status: string;
+}> {
+  return fetchApi('/subscription/payment/crypto', {
+    method: 'POST',
+    body: JSON.stringify({ plan_type: planType, currency })
+  });
+}
+
+export async function getPaymentStatus(paymentId: string): Promise<{
+  payment_id: string;
+  status: string;
+  amount: number;
+  currency: string;
+  crypto_address: string;
+  crypto_amount: string;
+  created_at: string;
+  expires_at?: string;
+  paid_at?: string;
+}> {
+  return fetchApi(`/subscription/payment/${paymentId}`);
+}
+
+export async function completeMockPayment(paymentId: string): Promise<{ success: boolean; message: string }> {
+  return fetchApi(`/subscription/payment/mock/${paymentId}/complete`, { method: 'POST' });
+}
+
+// Admin Subscription API
+export async function adminGetAllSubscriptions(): Promise<{ subscriptions: Subscription[] }> {
+  return fetchApi('/admin/subscription/all');
+}
+
+export async function adminGetSubscriptionStats(): Promise<{ stats: any }> {
+  return fetchApi('/admin/subscription/stats');
+}
+
+export async function adminExtendSubscription(userId: string, planType: string, days: number): Promise<{
+  success: boolean;
+  message: string;
+  subscription: Subscription;
+}> {
+  return fetchApi('/admin/subscription/extend', {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId, plan_type: planType, days })
+  });
 }

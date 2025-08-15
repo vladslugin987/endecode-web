@@ -10,6 +10,8 @@ import (
 	"photo-processing-server/internal/services"
 	"photo-processing-server/internal/web"
 	"photo-processing-server/internal/config"
+	"github.com/go-redis/redis/v8"
+	"context"
 )
 
 func main() {
@@ -18,10 +20,27 @@ func main() {
 	// Load config
 	cfg := config.Load()
 
+	// Initialize Redis client
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisHost + ":" + cfg.RedisPort,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+	
+	// Test Redis connection
+	ctx := context.Background()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		log.Printf("Warning: Redis connection failed: %v", err)
+		redisClient = nil
+	}
+
 	// Initialize services
 	logger := services.NewLogger()
 	logger.SetLevel(cfg.LogLevel)
 	processor := services.NewProcessor(logger)
+	subsService := services.NewSubscriptionService(logger, redisClient)
+	cryptoService := services.NewCryptoPaymentService(logger, subsService)
+	notificationService := services.NewNotificationService(logger)
 	
 	// Initialize WebSocket hub
 	web.InitializeWebSocket(logger)
@@ -52,19 +71,34 @@ func main() {
 		c.Next()
 	}
 	
-	// Create web handler
-	webHandler := web.NewWebHandler(processor, logger)
+	// Attach session auth middleware (cookies -> context userId)
+	router.Use(web.AuthMiddleware())
+	
+	// Create handlers
+	webHandler := web.NewWebHandler(processor, logger, subsService, notificationService)
+	subsHandler := web.NewSubscriptionHandler(subsService, cryptoService, logger)
+	wpService := services.NewWordPressService(logger, "", "", "", "", "")
+	wooHandler := web.NewWooCommerceHandler(processor, logger, wpService, notificationService)
 	
 	// Setup routes
+	web.SetupAuthRoutes(router)
 	webHandler.SetupRoutes(router)
+	subsHandler.SetupRoutes(router)
+	wooHandler.SetupRoutes(router)
 	web.SetupWebSocketRoutes(router)
 
-	// Protect API and WS
+	// Protect API and WS (skip auth endpoints and health)
 	router.Use(func(c *gin.Context) {
-		// Only protect /api and /ws when APIToken present
-		if cfg.APIToken != "" && (strings.HasPrefix(c.Request.URL.Path, "/api") || strings.HasPrefix(c.Request.URL.Path, "/ws")) {
-			authMiddleware(c)
-			return
+		if cfg.APIToken != "" {
+			path := c.Request.URL.Path
+			if strings.HasPrefix(path, "/api/auth") || path == "/health" {
+				c.Next()
+				return
+			}
+			if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/ws") {
+				authMiddleware(c)
+				return
+			}
 		}
 		c.Next()
 	})

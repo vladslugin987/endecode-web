@@ -19,6 +19,7 @@ type ProcessingJob struct {
 	Status       string    `json:"status" db:"status"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+	UserID       string    `json:"user_id" db:"user_id"`
 }
 
 // ProcessingStatus represents the status of a processing job
@@ -61,6 +62,7 @@ type DownloadLink struct {
 	DownloadedAt  *time.Time `json:"downloaded_at" db:"downloaded_at"`
 	DownloadCount int       `json:"download_count" db:"download_count"`
 	MaxDownloads  int       `json:"max_downloads" db:"max_downloads"`
+	IsActive      bool      `json:"is_active" db:"is_active"`
 }
 
 // WooCommerceOrder represents an order from WooCommerce webhook
@@ -99,3 +101,15 @@ const (
 	StatusApproved   ProcessingJobStatus = "approved"
 	StatusRejected   ProcessingJobStatus = "rejected"
 )
+
+// PhotoProcessingConfig represents configuration for photo processing from WordPress
+type PhotoProcessingConfig struct {
+	SourcePath      string `json:"source_path"`
+	NumCopies       int    `json:"num_copies"`
+	BaseText        string `json:"base_text"`
+	AddSwap         bool   `json:"add_swap"`
+	AddWatermark    bool   `json:"add_watermark"`
+	CreateZip       bool   `json:"create_zip"`
+	WatermarkText   string `json:"watermark_text,omitempty"`
+	PhotoNumber     *int   `json:"photo_number,omitempty"`
+}
